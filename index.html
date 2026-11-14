@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NASA Mars HAB: Симулятор выживания (Шаг 1)</title>
+    <!-- Tailwind CSS для минималистичного Sci-Fi HUD -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js и OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;600;700&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0b090a;
+            font-family: 'Space Grotesk', sans-serif;
+            user-select: none;
+        }
+
+        .font-mono-tech {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Стеклянный эффект в стиле NASA */
+        .nasa-panel {
+            background: rgba(15, 20, 28, 0.78);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .nasa-accent-border {
+            border-left: 3px solid #fc3d21; /* Официальный красный/оранжевый цвет NASA */
+        }
+
+        /* Анимация пульсации для критических уровней */
+        @keyframes pulse-danger {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.45; }
+        }
+        .animate-danger {
+            animation: pulse-danger 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Контейнер для 3D-рендера -->
+    <div id="canvas-container"></div>
+
+    <!-- ВЕРХНИЙ HUD: Статус миссии и 4 критических ресурса -->
+    <header class="fixed top-0 left-0 right-0 z-10 p-3 sm:p-4 pointer-events-none flex flex-col lg:flex-row justify-between items-center gap-3">
+        
+        <!-- Логотип миссии и время (Солы) -->
+        <div class="nasa-panel nasa-accent-border rounded-r-xl rounded-l-sm px-4 py-2.5 flex items-center gap-4 pointer-events-auto w-full lg:w-auto justify-between lg:justify-start">
+            <div class="flex items-center gap-3">
+                <!-- Процедурная эмблема NASA -->
+                <div class="w-10 h-10 rounded-full bg-[#0b3d91] flex items-center justify-center border border-white/30 relative overflow-hidden shrink-0">
+                    <span class="text-white font-bold text-xs tracking-tighter z-10">NASA</span>
+                    <div class="w-12 h-0.5 bg-[#fc3d21] -rotate-25 absolute"></div>
+                </div>
+                <div>
+                    <div class="text-[10px] uppercase tracking-widest text-orange-400 font-bold">ARES IV // JEZERO CRATER</div>
+                    <div class="text-white font-bold text-sm sm:text-base tracking-wide">БАЗА «ГОРИЗОНТ-1»</div>
+                </div>
+            </div>
+
+            <div class="h-8 w-[1px] bg-white/15 hidden sm:block"></div>
+
+            <!-- Счетчик Солов (1 минута = 1 сол) -->
+            <div class="text-right">
+                <div class="text-[10px] uppercase tracking-wider text-slate-400">Марсианское время</div>
+                <div class="font-mono-tech text-white font-bold text-sm sm:text-base">
+                    СОЛ <span id="sol-counter" class="text-orange-400">01</span> 
+                    <span id="sol-clock" class="text-slate-300 text-xs ml-1">08:00</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4 Критических ресурса -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 w-full lg:w-auto pointer-events-auto">
+            
+            <!-- 1. Кислород (O2) -->
+            <div id="card-o2" class="nasa-panel rounded-xl px-3 py-2 flex flex-col justify-between min-w-[140px]">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-xs font-semibold text-sky-300 flex items-center gap-1.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
+                        Кислород (O₂)
+                    </span>
+                    <span id="val-o2" class="font-mono-tech text-xs font-bold text-emerald-400">100%</span>
+                </div>
+                <div class="w-full bg-slate-800/90 h-2 rounded-full overflow-hidden">
+                    <div id="bar-o2" class="bg-emerald-400 h-full transition-all duration-300" style="width: 100%"></div>
+                </div>
+                <div class="text-[10px] text-slate-400 mt-1 font-mono-tech flex justify-between">
+                    <span>MOXIE: ОК</span>
+                    <span class="text-rose-400">-0.4%/с</span>
+                </div>
+            </div>
+
+            <!-- 2. Энергия (кВт·ч) -->
+            <div id="card-energy" class="nasa-panel rounded-xl px-3 py-2 flex flex-col justify-between min-w-[140px]">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        Энергия
+                    </span>
+                    <span id="val-energy" class="font-mono-tech text-xs font-bold text-emerald-400">100%</span>
+                </div>
+                <div class="w-full bg-slate-800/90 h-2 rounded-full overflow-hidden">
+                    <div id="bar-energy" class="bg-emerald-400 h-full transition-all duration-300" style="width: 100%"></div>
+                </div>
+                <div class="text-[10px] text-slate-400 mt-1 font-mono-tech flex justify-between">
+                    <span>СБ + РИТЭГ</span>
+                    <span class="text-rose-400">-0.6%/с</span>
+                </div>
+            </div>
+
+            <!-- 3. Вода (H2O) -->
+            <div id="card-water" class="nasa-panel rounded-xl px-3 py-2 flex flex-col justify-between min-w-[140px]">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-xs font-semibold text-blue-300 flex items-center gap-1.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707"></path></svg>
+                        Вода (H₂O)
+                    </span>
+                    <span id="val-water" class="font-mono-tech text-xs font-bold text-emerald-400">100%</span>
+                </div>
+                <div class="w-full bg-slate-800/90 h-2 rounded-full overflow-hidden">
+                    <div id="bar-water" class="bg-emerald-400 h-full transition-all duration-300" style="width: 100%"></div>
+                </div>
+                <div class="text-[10px] text-slate-400 mt-1 font-mono-tech flex justify-between">
+                    <span>Цикл: 94%</span>
+                    <span class="text-rose-400">-0.3%/с</span>
+                </div>
+            </div>
+
+            <!-- 4. Еда и Мораль -->
+            <div id="card-food" class="nasa-panel rounded-xl px-3 py-2 flex flex-col justify-between min-w-[140px]">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-xs font-semibold text-lime-300 flex items-center gap-1.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path></svg>
+                        Еда / Мораль
+                    </span>
+                    <span id="val-food" class="font-mono-tech text-xs font-bold text-emerald-400">100%</span>
+                </div>
+                <div class="w-full bg-slate-800/90 h-2 rounded-full overflow-hidden">
+                    <div id="bar-food" class="bg-emerald-400 h-full transition-all duration-300" style="width: 100%"></div>
+                </div>
+                <div class="text-[10px] text-slate-400 mt-1 font-mono-tech flex justify-between">
+                    <span>Экипаж: 4 чел</span>
+                    <span class="text-rose-400">-0.25%/с</span>
+                </div>
+            </div>
+
+        </div>
+    </header>
+
+    <!-- НИЖНЯЯ ПАНЕЛЬ: Подсказки управления и быстрые камеры -->
+    <footer class="fixed bottom-4 left-4 right-4 z-10 pointer-events-none flex flex-col sm:flex-row justify-between items-end sm:items-center gap-3">
+        
+        <!-- Кнопки камер -->
+        <div class="nasa-panel rounded-xl p-1.5 flex items-center gap-1.5 pointer-events-auto">
+            <button onclick="setCameraPreset('iso')" class="px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition cursor-pointer">
+                Обзор базы
+            </button>
+            <button onclick="setCameraPreset('hab')" class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-semibold transition cursor-pointer">
+                Жилой отсек
+            </button>
+            <button onclick="setCameraPreset('greenhouse')" class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-semibold transition cursor-pointer">
+                Оранжерея
+            </button>
+            <button onclick="setCameraPreset('power')" class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-semibold transition cursor-pointer">
+                Энергоблок
+            </button>
+        </div>
+
+        <!-- Статус-бар телеметрии -->
+        <div class="nasa-panel rounded-xl px-4 py-2 text-xs text-slate-300 pointer-events-auto flex items-center gap-3">
+            <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+            <span>ЛКМ — вращение • Колесо — зум • ПКМ — панорама</span>
+            <span class="hidden md:inline text-slate-500">|</span>
+            <span class="hidden md:inline font-mono-tech text-orange-300">T: -63°C | P: 610 Па</span>
+        </div>
+    </footer>
+
+    <!-- МОДАЛЬНОЕ ОКНО КРИТИЧЕСКОГО ИСХОДА (если ресурсы упали до 0) -->
+    <div id="gameover-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden items-center justify-center p-4">
+        <div class="nasa-panel border-red-500/50 max-w-md w-full rounded-2xl p-6 text-center">
+            <div class="w-14 h-14 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center mx-auto mb-4 border border-red-500/40">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            </div>
+            <h2 class="text-xl font-bold text-white mb-2">АВАРИЙНАЯ ЭВАКУАЦИЯ</h2>
+            <p id="gameover-reason" class="text-slate-300 text-sm mb-6">Критический уровень ресурсов жизнеобеспечения. Миссия приостановлена.</p>
+            <button onclick="resetSimulation()" class="w-full py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm transition cursor-pointer">
+                Перезапустить симуляцию (Сол 1)
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * ШАГ 1: КАРКАС 3D-СИМУЛЯЦИИ МАРСИАНСКОЙ БАЗЫ NASA
+         * Включает:
+         * 1. Процедурный ландшафт кратера Езеро с кратерами и камнями.
+         * 2. 3 основных герметичных модуля (Жилой отсек, Оранжерея, Энергоблок/СЖО), соединенных шлюзами.
+         * 3. Солнечные фермы, антенну связи, атмосферу и освещение заката на Марсе.
+         * 4. Симуляцию времени (1 мин = 1 сол) и постепенный расход 4 ресурсов.
+         */
+
+        // --- СОСТОЯНИЕ ИГРЫ (STATE) ---
+        const gameState = {
+            sol: 1,
+            solProgress: 0.33, // Начинаем с 08:00 утра (0.33 суток)
+            isPaused: false,
+            resources: {
+                o2: 100,
+                energy: 100,
+                water: 100,
+                food: 100
+            },
+            // Скорость расхода в % за 1 реальную секунду (для наглядности на Шаге 1)
+            drainRates: {
+                o2: 0.4,
+                energy: 0.6,
+                water: 0.3,
+                food: 0.25
+            }
+        };
+
+        // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ THREE.JS ---
+        let scene, camera, renderer, controls;
+        let clock = new THREE.Clock();
+        let dishGroup, solarPanelsGroup, greenhouseGlowMat;
+        let targetCameraPos = null;
+        let targetControlsLookAt = null;
+
+        // Инициализация при загрузке окна
+        window.onload = function() {
+            initScene();
+            buildMarsTerrain();
+            buildMarsBase();
+            buildEnvironmentDetails();
+            animate();
+        };
+
+        /**
+         * 1. Настройка сцены, камеры, рендера и марсианского освещения
+         */
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            // Пыльный красно-оранжевый марсианский горизонт и экспоненциальный туман
+            const skyColor = new THREE.Color(0xc86d44);
+            scene.background = skyColor;
+            scene.fog = new THREE.FogExp2(0xc86d44, 0.0085);
+
+            // Камера
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 500);
+            camera.position.set(32, 24, 34);
+
+            // Рендерер с мягкими тенями и кинематографичным тональным отображением
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.1;
+            container.appendChild(renderer.domElement);
+
+            // Управление камерой (OrbitControls)
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.06;
+            controls.maxPolarAngle = Math.PI / 2 - 0.04; // Не даем камере уйти под грунт
+            controls.minDistance = 10;
+            controls.maxDistance = 95;
+            controls.target.set(0, 2, 0);
+
+            // --- ОСВЕЩЕНИЕ ---
+            // 1. Полусферический свет (теплое марсианское небо сверху, ржавый грунт снизу)
+            const hemiLight = new THREE.HemisphereLight(0xffb085, 0x5c2415, 0.75);
+            scene.add(hemiLight);
+
+            // 2. Солнце на Марсе (низкое, тепло-золотистое, дающее длинные контрастные тени)
+            const sunLight = new THREE.DirectionalLight(0xffe3c2, 1.8);
+            sunLight.position.set(45, 28, -35);
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.camera.near = 5;
+            sunLight.shadow.camera.far = 150;
+            const d = 45;
+            sunLight.shadow.camera.left = -d;
+            sunLight.shadow.camera.right = d;
+            sunLight.shadow.camera.top = d;
+            sunLight.shadow.camera.bottom = -d;
+            sunLight.shadow.bias = -0.0005;
+            scene.add(sunLight);
+
+            // 3. Холодный контровой свет со стороны космоса (создает объем на белой обшивке NASA)
+            const rimLight = new THREE.DirectionalLight(0x7cc4ff, 0.45);
+            rimLight.position.set(-30, 15, 30);
+            scene.add(rimLight);
+
+            // Адаптивность при изменении размеров экрана
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        /**
+         * 2. Процедурная генерация поверхности Марса с кратерами и реголитом
+         */
+        function buildMarsTerrain() {
+            const size = 260;
+            const segments = 160;
+            const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
+            geometry.rotateX(-Math.PI / 2);
+
+            const pos = geometry.attributes.position;
+
+            // Координаты процедурных кратеров [x, z, радиус, глубина]
+            const craters = [
+                [-38, -28, 18, 2.4],
+                [42, 22, 22, 3.0],
+                [-25, 38, 12, 1.5],
+                [30, -42, 15, 2.0],
+                [0, -52, 25, 3.2]
+            ];
+
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i);
+                const z = pos.getZ(i);
+
+                // Расстояние от центра базы (площадку под базой делаем ровной)
+                const distFromBase = Math.sqrt(x * x + z * z);
+                let flattenFactor = THREE.MathUtils.smoothstep(distFromBase, 14, 28);
+
+                // Псевдо-шум для барханов и неровностей реголита
+                let height = (Math.sin(x * 0.08) * Math.cos(z * 0.08) * 1.1 +
+                              Math.sin(x * 0.23 + z * 0.19) * 0.35 +
+                              Math.cos(x * 0.5 - z * 0.4) * 0.12) * flattenFactor;
+
+                // Добавляем кратеры с характерным валом по краям
+                for (let c of craters) {
+                    const dx = x - c[0];
+                    const dz = z - c[1];
+                    const dist = Math.sqrt(dx * dx + dz * dz);
+                    const r = c[2];
+                    const depth = c[3];
+
+                    if (dist < r * 1.35) {
+                        const norm = dist / r;
+                        if (norm < 1.0) {
+                            // Чаша кратера
+                            height -= Math.cos(norm * Math.PI * 0.5) * depth;
+                        } else {
+                            // Вал вокруг кратера
+                            const rim = Math.sin(((norm - 1.0) / 0.35) * Math.PI);
+                            height += rim * (depth * 0.25);
+                        }
+                    }
+                }
+
+                pos.setY(i, height);
+            }
+
+            geometry.computeVertexNormals();
+
+            // PBR-материал марсианского грунта (богатый оксидом железа реголит)
+            const groundMat = new THREE.MeshStandardMaterial({
+                color: 0xb54b27,
+                roughness: 0.92,
+                metalness: 0.04,
+                flatShading: false
+            });
+
+            const terrain = new THREE.Mesh(geometry, groundMat);
+            terrain.receiveShadow = true;
+            scene.add(terrain);
+
+            // Добавляем разбросанные марсианские валуны (геологические породы)
+            const rockGeo = new THREE.DodecahedronGeometry(1, 0);
+            const rockMat = new THREE.MeshStandardMaterial({
+                color: 0x7a2e17,
+                roughness: 0.95,
+                metalness: 0.05
+            });
+
+            for (let i = 0; i < 85; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 16 + Math.random() * 85;
+                const rx = Math.cos(angle) * radius;
+                const rz = Math.sin(angle) * radius;
+
+                const rock = new THREE.Mesh(rockGeo, rockMat);
+                rock.position.set(rx, 0.1, rz);
+                const scale = 0.25 + Math.random() * 1.1;
+                rock.scale.set(scale * (0.8 + Math.random() * 0.5), scale * 0.65, scale);
+                rock.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+                rock.castShadow = true;
+                rock.receiveShadow = true;
+                scene.add(rock);
+            }
+        }
+
+        /**
+         * 3. Постройка станции NASA HAB (3 соединенных модуля + шлюзы + солнечные фермы)
+         */
+        function buildMarsBase() {
+            // --- ОБЩИЕ PBR-МАТЕРИАЛЫ NASA CLEAN SCI-FI ---
+            // Белый композитный корпус (кевларовая/керамическая термозащита)
+            const hullWhiteMat = new THREE.MeshStandardMaterial({
+                color: 0xf1f5f9,
+                roughness: 0.32,
+                metalness: 0.15
+            });
+
+            // Темный титановый каркас и ребра жесткости
+            const darkMetalMat = new THREE.MeshStandardMaterial({
+                color: 0x262d38,
+                roughness: 0.45,
+                metalness: 0.75
+            });
+
+            // Фирменный оранжевый акцент NASA (шлюзы, маркировка)
+            const nasaOrangeMat = new THREE.MeshStandardMaterial({
+                color: 0xfc3d21,
+                roughness: 0.35,
+                metalness: 0.2
+            });
+
+            // Золотая фольга (многослойная экранно-вакуумная теплоизоляция MLI)
+            const goldFoilMat = new THREE.MeshStandardMaterial({
+                color: 0xf59e0b,
+                roughness: 0.25,
+                metalness: 0.9
+            });
+
+            // Теплое свечение иллюминаторов жилого отсека
+            const windowWarmGlowMat = new THREE.MeshStandardMaterial({
+                color: 0xfff3d6,
+                emissive: 0xffb74d,
+                emissiveIntensity: 1.4,
+                roughness: 0.1
+            });
+
+            // Фито-свечение оранжереи (зеленовато-бирюзовый свет для растений)
+            greenhouseGlowMat = new THREE.MeshStandardMaterial({
+                color: 0xa7f3d0,
+                emissive: 0x10b981,
+                emissiveIntensity: 1.2,
+                roughness: 0.2,
+                transparent: true,
+                opacity: 0.88
+            });
+
+            const baseGroup = new THREE.Group();
+            scene.add(baseGroup);
+
+            // Функция создания опорных стоек под модулями (выравнивание на грунте)
+            function addLandingLegs(parent, radius, count, yBottom) {
+                const legGeo = new THREE.CylinderGeometry(0.15, 0.25, 1.4, 8);
+                const padGeo = new THREE.CylinderGeometry(0.55, 0.65, 0.18, 12);
+                for (let i = 0; i < count; i++) {
+                    const a = (i / count) * Math.PI * 2 + Math.PI / 4;
+                    const lx = Math.cos(a) * radius;
+                    const lz = Math.sin(a) * radius;
+
+                    const leg = new THREE.Mesh(legGeo, darkMetalMat);
+                    leg.position.set(lx, yBottom + 0.5, lz);
+                    leg.rotation.z = -Math.cos(a) * 0.2;
+                    leg.rotation.x = Math.sin(a) * 0.2;
+                    leg.castShadow = true;
+                    parent.add(leg);
+
+                    const pad = new THREE.Mesh(padGeo, darkMetalMat);
+                    pad.position.set(lx * 1.08, 0.09, lz * 1.08);
+                    pad.receiveShadow = true;
+                    parent.add(pad);
+                }
+            }
+
+            // =========================================================
+            // МОДУЛЬ 1: ГЛАВНЫЙ ЖИЛОЙ ОТСЕК (HABITAT - ЦЕНТР)
+            // =========================================================
+            const habGroup = new THREE.Group();
+            habGroup.position.set(0, 0, 0);
+            baseGroup.add(habGroup);
+
+            // Основной цилиндр жилого модуля
+            const habBody = new THREE.Mesh(new THREE.CylinderGeometry(4.4, 4.4, 3.8, 32), hullWhiteMat);
+            habBody.position.y = 2.7;
+            habBody.castShadow = true;
+            habBody.receiveShadow = true;
+            habGroup.add(habBody);
+
+            // Сферический купол крыши
+            const habDome = new THREE.Mesh(
+                new THREE.SphereGeometry(4.4, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+                hullWhiteMat
+            );
+            habDome.position.y = 4.6;
+            habDome.castShadow = true;
+            habGroup.add(habDome);
+
+            // Оранжевый пояс NASA и темные силовые кольца
+            const habRingBottom = new THREE.Mesh(new THREE.CylinderGeometry(4.52, 4.52, 0.35, 32), darkMetalMat);
+            habRingBottom.position.y = 0.95;
+            habGroup.add(habRingBottom);
+
+            const habStripe = new THREE.Mesh(new THREE.CylinderGeometry(4.46, 4.46, 0.42, 32), nasaOrangeMat);
+            habStripe.position.y = 4.4;
+            habGroup.add(habStripe);
+
+            // Иллюминаторы по периметру жилого отсека
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2 + 0.5;
+                const winFrame = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.65, 0.3), darkMetalMat);
+                winFrame.position.set(Math.cos(angle) * 4.38, 2.9, Math.sin(angle) * 4.38);
+                winFrame.rotation.y = -angle + Math.PI / 2;
+                habGroup.add(winFrame);
+
+                const winGlass = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.45, 0.34), windowWarmGlowMat);
+                winGlass.position.copy(winFrame.position);
+                winGlass.rotation.copy(winFrame.rotation);
+                habGroup.add(winGlass);
+            }
+
+            // Главный входной шлюз (Airlock) спереди (по оси +Z)
+            const airlockTunnel = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 2.4, 20), hullWhiteMat);
+            airlockTunnel.rotation.x = Math.PI / 2;
+            airlockTunnel.position.set(0, 1.8, 5.0);
+            airlockTunnel.castShadow = true;
+            habGroup.add(airlockTunnel);
+
+            const airlockDoor = new THREE.Mesh(new THREE.CylinderGeometry(1.38, 1.38, 0.35, 20), nasaOrangeMat);
+            airlockDoor.rotation.x = Math.PI / 2;
+            airlockDoor.position.set(0, 1.8, 6.2);
+            habGroup.add(airlockDoor);
+
+            // Небольшой пандус у шлюза
+            const ramp = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.2, 1.8), darkMetalMat);
+            ramp.position.set(0, 0.45, 6.9);
+            ramp.rotation.x = 0.45;
+            ramp.receiveShadow = true;
+            habGroup.add(ramp);
+
+            addLandingLegs(habGroup, 4.1, 6, 0.2);
+
+            // =========================================================
+            // МОДУЛЬ 2: ГИДРОПОННАЯ ОРАНЖЕРЕЯ (GREENHOUSE - СЛЕВА, X = -11)
+            // =========================================================
+            const ghGroup = new THREE.Group();
+            ghGroup.position.set(-11, 0, 0);
+            baseGroup.add(ghGroup);
+
+            // Основание оранжереи
+            const ghBase = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 3.7, 1.3, 28), hullWhiteMat);
+            ghBase.position.y = 1.35;
+            ghBase.castShadow = true;
+            ghBase.receiveShadow = true;
+            ghGroup.add(ghBase);
+
+            // Полупрозрачный био-купол со светящимися фитолампами
+            const ghDome = new THREE.Mesh(
+                new THREE.SphereGeometry(3.45, 28, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+                greenhouseGlowMat
+            );
+            ghDome.position.y = 2.0;
+            ghGroup.add(ghDome);
+
+            // Внешние силовые ребра жесткости купола
+            for (let i = 0; i < 4; i++) {
+                const arch = new THREE.Mesh(
+                    new THREE.TorusGeometry(3.52, 0.1, 8, 28, Math.PI),
+                    darkMetalMat
+                );
+                arch.position.y = 2.0;
+                arch.rotation.y = (i / 4) * Math.PI;
+                arch.castShadow = true;
+                ghGroup.add(arch);
+            }
+
+            // Грядки внутри оранжереи (видны сквозь купол)
+            const plantBedMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.8 });
+            const bed1 = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.4, 1.2), plantBedMat);
+            bed1.position.set(0, 2.1, -1.0);
+            ghGroup.add(bed1);
+            const bed2 = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.4, 1.2), plantBedMat);
+            bed2.position.set(0, 2.1, 1.0);
+            ghGroup.add(bed2);
+
+            addLandingLegs(ghGroup, 3.3, 4, 0.2);
+
+            // =========================================================
+            // МОДУЛЬ 3: ЭНЕРГОБЛОК И СЖО / MOXIE (LIFE SUPPORT - СПРАВА, X = +11)
+            // =========================================================
+            const powerGroup = new THREE.Group();
+            powerGroup.position.set(11, 0, 0);
+            baseGroup.add(powerGroup);
+
+            // Горизонтальный цилиндрический модуль СЖО
+            const lsBody = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 2.8, 6.2, 24), hullWhiteMat);
+            lsBody.rotation.z = Math.PI / 2;
+            lsBody.position.y = 3.2;
+            lsBody.castShadow = true;
+            lsBody.receiveShadow = true;
+            powerGroup.add(lsBody);
+
+            // Торцевые крышки модуля
+            const capLeft = new THREE.Mesh(new THREE.SphereGeometry(2.8, 24, 16), darkMetalMat);
+            capLeft.scale.set(0.4, 1, 1);
+            capLeft.position.set(-3.1, 3.2, 0);
+            powerGroup.add(capLeft);
+
+            const capRight = new THREE.Mesh(new THREE.SphereGeometry(2.8, 24, 16), nasaOrangeMat);
+            capRight.scale.set(0.4, 1, 1);
+            capRight.position.set(3.1, 3.2, 0);
+            powerGroup.add(capRight);
+
+            // Внешние криогенные баки (O2, H2O, CO2) с золотой теплоизоляцией NASA
+            const tankPositions = [
+                [-1.6, 1.5, 3.2],
+                [0, 1.5, 3.2],
+                [1.6, 1.5, 3.2]
+            ];
+            tankPositions.forEach((pos, idx) => {
+                const tank = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.6, 0.6, 2.2, 16),
+                    idx === 1 ? goldFoilMat : hullWhiteMat
+                );
+                tank.position.set(pos[0], pos[1], pos[2]);
+                tank.castShadow = true;
+                powerGroup.add(tank);
+            });
+
+            // Резервный РИТЭГ (радиоизотопный генератор с радиаторами)
+            const rtgCore = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 1.8, 16), darkMetalMat);
+            rtgCore.position.set(3.8, 1.3, -2.2);
+            rtgCore.castShadow = true;
+            powerGroup.add(rtgCore);
+
+            // Опоры для модуля СЖО
+            for (let sx of [-2.0, 2.0]) {
+                for (let sz of [-1.8, 1.8]) {
+                    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.6, 0.35), darkMetalMat);
+                    strut.position.set(sx, 0.8, sz);
+                    strut.castShadow = true;
+                    powerGroup.add(strut);
+                }
+            }
+
+            // =========================================================
+            // ГЕРМЕТИЧНЫЕ ПЕРЕХОДНЫЕ ШЛЮЗЫ (ТУННЕЛИ МЕЖДУ МОДУЛЯМИ)
+            // =========================================================
+            function createConnectorTunnel(xStart, xEnd) {
+                const length = Math.abs(xEnd - xStart);
+                const centerX = (xStart + xEnd) / 2;
+
+                const tunnel = new THREE.Mesh(
+                    new THREE.CylinderGeometry(1.15, 1.15, length, 20),
+                    hullWhiteMat
+                );
+                tunnel.rotation.z = Math.PI / 2;
+                tunnel.position.set(centerX, 2.0, 0);
+                tunnel.castShadow = true;
+                baseGroup.add(tunnel);
+
+                // Гофрированные оранжевые стыковочные кольца
+                for (let offset of [-length * 0.28, 0, length * 0.28]) {
+                    const ring = new THREE.Mesh(
+                        new THREE.TorusGeometry(1.18, 0.12, 10, 24),
+                        nasaOrangeMat
+                    );
+                    ring.rotation.y = Math.PI / 2;
+                    ring.position.set(centerX + offset, 2.0, 0);
+                    baseGroup.add(ring);
+                }
+            }
+
+            createConnectorTunnel(-7.5, -4.3); // Связь Оранжерея <-> Жилой отсек
+            createConnectorTunnel(4.3, 7.9);   // Связь Жилой отсек <-> Энергоблок
+        }
+
+        /**
+         * 4. Дополнительные детали инфраструктуры: солнечные батареи, антенна и марсоход
+         */
+        function buildEnvironmentDetails() {
+            const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.8 });
+            const solarCellMat = new THREE.MeshStandardMaterial({
+                color: 0x1d4ed8,
+                emissive: 0x0f172a,
+                roughness: 0.18,
+                metalness: 0.85
+            });
+            const hullWhiteMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 });
+            const nasaOrangeMat = new THREE.MeshStandardMaterial({ color: 0xfc3d21, roughness: 0.35 });
+
+            // --- ПОЛЕ СОЛНЕЧНЫХ ПАНЕЛЕЙ (СЗАДИ ОТ ЭНЕРГОБЛОКА) ---
+            solarPanelsGroup = new THREE.Group();
+            solarPanelsGroup.position.set(10, 0, -10);
+            scene.add(solarPanelsGroup);
+
+            for (let i = 0; i < 3; i++) {
+                const panelUnit = new THREE.Group();
+                panelUnit.position.set(i * 4.8 - 4.8, 0, 0);
+
+                // Стойка
+                const post = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.25, 2.4, 10), darkMetalMat);
+                post.position.y = 1.2;
+                post.castShadow = true;
+                panelUnit.add(post);
+
+                // Полотно солнечной батареи
+                const wing = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.12, 5.2), solarCellMat);
+                wing.position.y = 2.5;
+                wing.rotation.x = 0.42; // Наклон к солнцу
+                wing.castShadow = true;
+                wing.receiveShadow = true;
+                panelUnit.add(wing);
+
+                solarPanelsGroup.add(panelUnit);
+            }
+
+            // --- АНТЕННА ДАЛЬНЕЙ КОСМИЧЕСКОЙ СВЯЗИ (НА КРЫШЕ ЖИЛОГО ОТСЕКА) ---
+            dishGroup = new THREE.Group();
+            dishGroup.position.set(0, 9.0, 0);
+            scene.add(dishGroup);
+
+            const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.25, 1.6, 12), darkMetalMat);
+            mast.position.y = -0.4;
+            dishGroup.add(mast);
+
+            const dish = new THREE.Mesh(
+                new THREE.SphereGeometry(1.4, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.38),
+                hullWhiteMat
+            );
+            dish.rotation.x = Math.PI * 0.72;
+            dish.position.y = 0.6;
+            dishGroup.add(dish);
+
+            const beacon = new THREE.Mesh(
+                new THREE.SphereGeometry(0.14, 8, 8),
+                new THREE.MeshBasicMaterial({ color: 0xff3b1f })
+            );
+            beacon.position.set(0, 1.3, 0.4);
+            dishGroup.add(beacon);
+
+            // --- ПРОТОТИП МАРСОХОДА У ШЛЮЗА ---
+            const roverGroup = new THREE.Group();
+            roverGroup.position.set(-4.5, 0, 8.5);
+            roverGroup.rotation.y = 0.55;
+            scene.add(roverGroup);
+
+            const chassis = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.85, 3.2), hullWhiteMat);
+            chassis.position.y = 1.05;
+            chassis.castShadow = true;
+            roverGroup.add(chassis);
+
+            const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.75, 1.4), nasaOrangeMat);
+            cabin.position.set(0, 1.65, 0.5);
+            cabin.castShadow = true;
+            roverGroup.add(cabin);
+
+            // 6 колес марсохода
+            const wheelGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.35, 16);
+            wheelGeo.rotateZ(Math.PI / 2);
+            for (let wx of [-1.25, 1.25]) {
+                for (let wz of [-1.1, 0, 1.1]) {
+                    const wheel = new THREE.Mesh(wheelGeo, darkMetalMat);
+                    wheel.position.set(wx, 0.45, wz);
+                    wheel.castShadow = true;
+                    roverGroup.add(wheel);
+                }
+            }
+        }
+
+        /**
+         * 5. Обновление игровой логики, времени (Солов) и UI-индикаторов
+         */
+        function updateSimulation(delta) {
+            if (gameState.isPaused) return;
+
+            // 1 минута реального времени (60 секунд) = 1 марсианский сол
+            gameState.solProgress += delta / 60;
+            if (gameState.solProgress >= 1.0) {
+                gameState.solProgress -= 1.0;
+                gameState.sol += 1;
+            }
+
+            // Обновляем отображение времени суток (24-часовой формат сола)
+            const totalMinutes = Math.floor(gameState.solProgress * 24 * 60);
+            const hours = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
+            const mins = String(totalMinutes % 60).padStart(2, '0');
+            document.getElementById('sol-counter').textContent = String(gameState.sol).padStart(2, '0');
+            document.getElementById('sol-clock').textContent = `${hours}:${mins}`;
+
+            // Расход 4 ресурсов
+            for (let key of ['o2', 'energy', 'water', 'food']) {
+                gameState.resources[key] = Math.max(0, gameState.resources[key] - gameState.drainRates[key] * delta);
+                updateResourceUI(key, gameState.resources[key]);
+
+                if (gameState.resources[key] <= 0) {
+                    triggerGameOver(key);
+                    return;
+                }
+            }
+        }
+
+        /**
+         * Обновление полосок и цветовых индикаторов (Зеленый / Желтый / Красный)
+         */
+        function updateResourceUI(key, value) {
+            const valEl = document.getElementById(`val-${key}`);
+            const barEl = document.getElementById(`bar-${key}`);
+            const rounded = Math.ceil(value);
+
+            valEl.textContent = `${rounded}%`;
+            barEl.style.width = `${value}%`;
+
+            // Сброс классов цвета
+            barEl.classList.remove('bg-emerald-400', 'bg-amber-400', 'bg-rose-500', 'animate-danger');
+            valEl.classList.remove('text-emerald-400', 'text-amber-400', 'text-rose-500');
+
+            if (value > 50) {
+                barEl.classList.add('bg-emerald-400');
+                valEl.classList.add('text-emerald-400');
+            } else if (value > 25) {
+                barEl.classList.add('bg-amber-400');
+                valEl.classList.add('text-amber-400');
+            } else {
+                barEl.classList.add('bg-rose-500', 'animate-danger');
+                valEl.classList.add('text-rose-500');
+            }
+        }
+
+        function triggerGameOver(depletedKey) {
+            gameState.isPaused = true;
+            const names = {
+                o2: 'Запасы кислорода (O₂) исчерпаны!',
+                energy: 'Аккумуляторы полностью разряжены! Системы жизнеобеспечения отключены.',
+                water: 'Запасы питьевой и технической воды (H₂O) закончились!',
+                food: 'Запасы продовольствия исчерпаны, мораль экипажа упала до нуля!'
+            };
+            document.getElementById('gameover-reason').textContent = names[depletedKey];
+            const modal = document.getElementById('gameover-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function resetSimulation() {
+            gameState.sol = 1;
+            gameState.solProgress = 0.33;
+            gameState.resources = { o2: 100, energy: 100, water: 100, food: 100 };
+            gameState.isPaused = false;
+
+            const modal = document.getElementById('gameover-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        /**
+         * Плавное перемещение камеры по пресетам отсеков
+         */
+        function setCameraPreset(preset) {
+            switch (preset) {
+                case 'iso':
+                    targetCameraPos = new THREE.Vector3(32, 24, 34);
+                    targetControlsLookAt = new THREE.Vector3(0, 2, 0);
+                    break;
+                case 'hab':
+                    targetCameraPos = new THREE.Vector3(0, 11, 18);
+                    targetControlsLookAt = new THREE.Vector3(0, 3, 0);
+                    break;
+                case 'greenhouse':
+                    targetCameraPos = new THREE.Vector3(-18, 10, 14);
+                    targetControlsLookAt = new THREE.Vector3(-11, 2.5, 0);
+                    break;
+                case 'power':
+                    targetCameraPos = new THREE.Vector3(21, 11, 13);
+                    targetControlsLookAt = new THREE.Vector3(11, 2.5, -2);
+                    break;
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        /**
+         * Главный цикл рендеринга и анимации
+         */
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = Math.min(clock.getDelta(), 0.1);
+            const elapsed = clock.getElapsedTime();
+
+            // Обновление таймеров и ресурсов
+            updateSimulation(delta);
+
+            // Плавное вращение антенны связи (поиск сигнала Земли)
+            if (dishGroup) {
+                dishGroup.rotation.y = Math.sin(elapsed * 0.4) * 0.6;
+            }
+
+            // Легкая пульсация фитоламп в оранжерее
+            if (greenhouseGlowMat) {
+                greenhouseGlowMat.emissiveIntensity = 1.1 + Math.sin(elapsed * 2.0) * 0.2;
+            }
+
+            // Плавный перелет камеры при нажатии кнопок HUD
+            if (targetCameraPos && targetControlsLookAt) {
+                camera.position.lerp(targetCameraPos, 0.06);
+                controls.target.lerp(targetControlsLookAt, 0.06);
+                if (camera.position.distanceTo(targetCameraPos) < 0.2) {
+                    targetCameraPos = null;
+                    targetControlsLookAt = null;
+                }
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
